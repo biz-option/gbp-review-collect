@@ -1,0 +1,33 @@
+{
+  "name": "gbp-review-collect",
+  "version": "1.0.0",
+  "description": "Google Business Profile review collector to Google Sheets",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "gcp-build": "npm run build",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "auth:gbp": "ts-node scripts/auth-init.ts gbp",
+    "auth:gmail": "ts-node scripts/auth-init.ts gmail",
+    "register-notifications": "ts-node scripts/register-notifications.ts"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.0",
+    "@google-cloud/pubsub": "^4.7.0",
+    "@google-cloud/secret-manager": "^5.6.0",
+    "@types/dotenv": "^8.2.3",
+    "axios": "^1.7.7",
+    "dotenv": "^17.4.2",
+    "google-auth-library": "^9.14.1",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
