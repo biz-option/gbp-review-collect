@@ -69,11 +69,11 @@ export async function handleReviewNotification(req: Request, res: Response): Pro
     const businessName = locationId; // TODO: locations APIでtitleを取得
 
     // Google Sheets に追記（ヘッダーがなければ自動作成）
-    await ensureSheetHeader(auth);
-    await appendReview(auth, review, businessName);
+    await ensureSheetHeader();
+    await appendReview(review, businessName);
 
     // 最終取得日時を更新
-    await updateLastFetchTime(auth);
+    await updateLastFetchTime();
 
     console.log(`✓ レビュー記録完了: ${review.reviewId}`);
     res.status(200).send('ok');
