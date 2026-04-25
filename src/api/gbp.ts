@@ -4,7 +4,6 @@ import { OAuth2Client } from 'google-auth-library';
 const ACCOUNT_MGMT_URL = 'https://mybusinessaccountmanagement.googleapis.com/v1';
 const BUSINESS_INFO_URL = 'https://mybusinessbusinessinformation.googleapis.com/v1';
 const NOTIFICATIONS_URL = 'https://mybusinessnotifications.googleapis.com/v1';
-const REVIEWS_URL = 'https://mybusiness.googleapis.com/v4';
 
 export interface Review {
   name: string;           // e.g. "accounts/xxx/locations/yyy/reviews/zzz"
@@ -36,7 +35,8 @@ export async function getReview(
   reviewName: string  // "accounts/{accountId}/locations/{locationId}/reviews/{reviewId}"
 ): Promise<Review> {
   const token = await auth.getAccessToken();
-  const res = await axios.get(`${REVIEWS_URL}/${reviewName}`, {
+  // Reviews API は mybusinessbusinessinformation の下
+  const res = await axios.get(`${BUSINESS_INFO_URL}/${reviewName}`, {
     headers: { Authorization: `Bearer ${token.token}` },
   });
   return res.data as Review;

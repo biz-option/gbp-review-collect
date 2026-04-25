@@ -15,4 +15,3 @@
 
 node_modules
 #!include:.gitignore
-!dist/

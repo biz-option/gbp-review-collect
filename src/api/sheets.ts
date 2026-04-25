@@ -1,9 +1,12 @@
 import { google } from 'googleapis';
+import { OAuth2Client } from 'google-auth-library';
 import { Review, starToNumber } from './gbp';
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID!;
 const SHEET_NAME = process.env.SHEET_NAME || 'レビュー一覧';
 
+// シート列定義（A列から順）
+// A: 取得日時, B: 投稿日時, C: ビジネス名, D: 評価（数字）, E: 評価（星）, F: 投稿者名, G: コメント, H: 返信
 const HEADER_ROW = ['取得日時', '投稿日時', 'ビジネス名', '評価（数字）', '評価（星）', '投稿者名', 'コメント', '返信'];
 
 function toStars(n: number): string {
@@ -18,15 +21,8 @@ function formatJst(isoString: string): string {
   });
 }
 
-function getSheetsClient() {
-  const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-  return google.sheets({ version: 'v4', auth });
-}
-
-export async function ensureSheetHeader(): Promise<void> {
-  const sheets = getSheetsClient();
+export async function ensureSheetHeader(auth: OAuth2Client): Promise<void> {
+  const sheets = google.sheets({ version: 'v4', auth });
 
   // 2行目にヘッダーがなければ書き込む（1行目は最終更新日時用）
   const res = await sheets.spreadsheets.values.get({
@@ -44,10 +40,11 @@ export async function ensureSheetHeader(): Promise<void> {
   }
 }
 
-export async function updateLastFetchTime(): Promise<void> {
-  const sheets = getSheetsClient();
+export async function updateLastFetchTime(auth: OAuth2Client): Promise<void> {
+  const sheets = google.sheets({ version: 'v4', auth });
   const now = formatJst(new Date().toISOString());
 
+  // A1セルに最終更新日時を記録（データとは別のメタ行）
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${SHEET_NAME}!A1`,
@@ -57,10 +54,11 @@ export async function updateLastFetchTime(): Promise<void> {
 }
 
 export async function appendReview(
+  auth: OAuth2Client,
   review: Review,
   businessName: string
 ): Promise<void> {
-  const sheets = getSheetsClient();
+  const sheets = google.sheets({ version: 'v4', auth });
 
   const starNum = starToNumber(review.starRating);
   const fetchedAt = formatJst(new Date().toISOString());
