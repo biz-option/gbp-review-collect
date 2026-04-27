@@ -2,17 +2,36 @@
 
 Google Business Profile（GBP）に投稿されたレビューをリアルタイムで検知し、Google Sheets に自動記録するシステム。
 
+## Googleアカウントの役割
+
+| アカウント | メールアドレス | 役割 |
+|-----------|--------------|------|
+| **APIアカウント** | `yk110303@gmail.com` | GCPプロジェクト（`oaky-gmb`）のオーナー。GBP API の審査・承認を受けたアカウント。OAuthクライアントIDもこのアカウントで作成。 |
+| **GBPアカウント** | `kutikomikannri02@gmail.com` | Google Business Profile を実際に管理するアカウント。1,000件以上の店舗を管理しており、レビュー通知の登録対象。 |
+
+### どの処理をどのアカウントで行うか
+
+| 処理 | 使用アカウント | 備考 |
+|------|--------------|------|
+| GCP コンソール操作（API有効化、Cloud Functions デプロイ等） | `yk110303@gmail.com`（APIアカウント） | GCPプロジェクトのオーナー |
+| `npm run auth:gbp`（OAuth認証） | `kutikomikannri02@gmail.com`（GBPアカウント） | **ブラウザで必ずGBPアカウントでログイン**。このアカウントのリフレッシュトークンを Secret Manager に保存する |
+| `npm run register-notifications`（通知登録） | 自動（`auth:gbp` で取得したトークンを使用） | GBPアカウントが管理する全店舗に通知を登録 |
+| Google Sheets 操作 | Cloud Functions SA（自動） | Cloud Functions のサービスアカウントで ADC 認証 |
+
+> **重要**: `npm run auth:gbp` 実行時にブラウザで開くログイン画面では、必ず `kutikomikannri02@gmail.com`（GBPアカウント）でログインすること。`yk110303@gmail.com` でログインすると、店舗を管理していないアカウントのトークンが保存され、通知登録が正しく機能しない。
+
+---
+
 ## システム全体図
 
 ```text
-【Googleアカウント: <GBP_ADMIN_EMAIL>】
+【GBPアカウント: kutikomikannri02@gmail.com】
   GBP（Google Business Profile）
-  ├── アカウント: <GBP_ACCOUNT_1>
-  └── アカウント: <GBP_ACCOUNT_2>
+  └── 管理する全店舗（1,000件以上）
          │
          │ レビューが投稿されると通知
          ▼
-【GCP プロジェクト: <GCP_PROJECT_ID>】
+【GCPプロジェクト: oaky-gmb（APIアカウント: yk110303@gmail.com が管理）】
   ┌─────────────────────────────────────────────────────────┐
   │                                                         │
   │  Pub/Sub トピック                                        │
@@ -27,11 +46,11 @@ Google Business Profile（GBP）に投稿されたレビューをリアルタイ
   │    ▼                         ▼                         │
   │  GBP API                  Secret Manager               │
   │  mybusiness.googleapis.com  gbp-refresh-token          │
-  │    │                                                    │
+  │    │                        （GBPアカウントのトークン）     │
   │    │ レビューデータを書き込む                               │
   │    ▼                                                    │
   │  Google Sheets                                          │
-  │  スプレッドシートID: <SPREADSHEET_ID>                     │
+  │  スプレッドシートID: 1tXSHtXuXmjopJ5nfZayc_VdiSwtjWUIqEMThJHV0m64  │
   │                                                         │
   └─────────────────────────────────────────────────────────┘
 ```
@@ -39,25 +58,25 @@ Google Business Profile（GBP）に投稿されたレビューをリアルタイ
 ## 認証の仕組み
 
 ```text
-【<API_ACCOUNT_EMAIL>】
+【GBPアカウント: kutikomikannri02@gmail.com】
   │
-  │ OAuth2.0 認証（初回のみ手動で npm run auth:gbp を実行）
+  │ OAuth2.0 認証（npm run auth:gbp を手動実行）
   ▼
-GBP API へのアクセス権
+GBP API へのアクセス権（管理する全店舗のレビュー取得権限）
   │
   │ リフレッシュトークンを保存
   ▼
-Secret Manager（<GCP_PROJECT_ID> プロジェクト）
+Secret Manager（oaky-gmb プロジェクト）
   gbp-refresh-token
   │
   │ Cloud Functions 実行時に自動取得
   ▼
-GBP API 呼び出し（レビュー取得）
+GBP API 呼び出し（レビュー詳細取得）
 
 ---
 
 Cloud Functions の Google Sheets アクセス:
-  Cloud Functions サービスアカウント: <SERVICE_ACCOUNT>
+  Cloud Functions サービスアカウント: 429122503904-compute@developer.gserviceaccount.com
   │
   │ ADC（Application Default Credentials）で自動認証
   ▼
@@ -69,7 +88,7 @@ Google Sheets 書き込み
 
 | サービス | 役割 | 管理場所 |
 |---------|------|---------|
-| GBP | レビューの発生元。新着レビューを Pub/Sub に通知する | Google ビジネスプロフィール管理画面 |
+| GBP | レビューの発生元。新着レビューを Pub/Sub に通知する | Google ビジネスプロフィール管理画面（GBPアカウントでログイン） |
 | Pub/Sub | GBP からの通知メッセージを受け取るキュー | GCP コンソール > Pub/Sub |
 | Cloud Functions | Pub/Sub のメッセージを受け取り、レビューをシートに書く処理本体 | GCP コンソール > Cloud Functions |
 | Secret Manager | OAuth リフレッシュトークンを安全に保管 | GCP コンソール > Secret Manager |
@@ -85,20 +104,18 @@ Google Sheets 書き込み
 | OAuth リフレッシュトークン | Secret Manager に保存済み | **テストモードの場合7日で失効**するため `npm run auth:gbp` で再発行が必要 |
 | GBP_CLIENT_ID / GBP_CLIENT_SECRET | `.env` ファイルに保存 | 再認証時・再デプロイ時に必要 |
 
-> **重要**: OAuth 同意画面を「本番環境」に昇格させると、トークンの期限切れがなくなります。現在はテストモードのため 7 日ごとに `npm run auth:gbp` が必要です。
+> **重要**: OAuth 同意画面を「本番環境」に昇格させると、トークンの期限切れがなくなります。現在はテストモードのため 7 日ごとに `npm run auth:gbp` が必要です。その際も必ず `kutikomikannri02@gmail.com` でログインしてください。
 
-### 変わらない設定値（メモとして）
+### 固定の設定値
 
-実際の値は `.env` および Secret Manager で管理してください。
-
-| 項目 | 変数名 / シークレット名 |
-|------|----------------------|
-| GCP プロジェクト ID | `GCP_PROJECT_ID` |
+| 項目 | 値 |
+|------|---|
+| GCPプロジェクトID | `oaky-gmb` |
 | Pub/Sub トピック | `gbp-review-notifications` |
 | Cloud Functions 名 | `reviewNotification` |
 | リージョン | `asia-northeast1` |
-| スプレッドシート ID | `SPREADSHEET_ID` |
-| Cloud Functions SA | `<SERVICE_ACCOUNT>`（GCP コンソールで確認） |
+| スプレッドシートID | `1tXSHtXuXmjopJ5nfZayc_VdiSwtjWUIqEMThJHV0m64` |
+| Cloud Functions SA | `429122503904-compute@developer.gserviceaccount.com` |
 | GBP 通知用 SA | `mybusiness-api-pubsub@system.gserviceaccount.com` |
 
 ## 技術スタック
@@ -135,9 +152,9 @@ gbp-review-collect/
 ### 前提条件
 
 - Node.js 22+
-- gcloud CLI（初期設定済み）
+- gcloud CLI（初期設定済み・`yk110303@gmail.com` でログイン済み）
 - GBP API のアクセス権限を Google から取得済み（プロジェクト単位で審査あり）
-- GCP プロジェクト作成済み・必要な API 有効化済み
+- GCP プロジェクト（`oaky-gmb`）作成済み・必要な API 有効化済み
 
 ### 1. 依存パッケージのインストール
 
@@ -156,10 +173,10 @@ cp .env.example .env
 |--------|------|
 | `GBP_CLIENT_ID` | OAuth クライアントID（GCP コンソール > APIとサービス > 認証情報） |
 | `GBP_CLIENT_SECRET` | OAuth クライアントシークレット |
-| `GCP_PROJECT_ID` | GCPプロジェクトID |
-| `SPREADSHEET_ID` | Google SheetsのID（URLの `/d/` と `/edit` の間の文字列） |
-| `SHEET_NAME` | シート名（デフォルト: `レビュー一覧`） |
-| `PUBSUB_TOPIC` | Pub/SubトピックID（デフォルト: `gbp-review-notifications`） |
+| `GCP_PROJECT_ID` | `oaky-gmb` |
+| `SPREADSHEET_ID` | `1tXSHtXuXmjopJ5nfZayc_VdiSwtjWUIqEMThJHV0m64` |
+| `SHEET_NAME` | `レビュー一覧` |
+| `PUBSUB_TOPIC` | `gbp-review-notifications` |
 
 ### 3. Pub/Sub トピックへの GBP 通知権限付与（初回のみ）
 
@@ -167,7 +184,7 @@ cp .env.example .env
 gcloud pubsub topics add-iam-policy-binding gbp-review-notifications \
   --member="serviceAccount:mybusiness-api-pubsub@system.gserviceaccount.com" \
   --role="roles/pubsub.publisher" \
-  --project=<GCP_PROJECT_ID>
+  --project=oaky-gmb
 ```
 
 ### 4. OAuth 認証（リフレッシュトークン取得）
@@ -176,9 +193,12 @@ gcloud pubsub topics add-iam-policy-binding gbp-review-notifications \
 npm run auth:gbp
 ```
 
-ブラウザが開くので GBP API 用アカウント（`<API_ACCOUNT_EMAIL>`）でログイン。リフレッシュトークンは自動的に Secret Manager に保存される。
+ブラウザが開くので **`kutikomikannri02@gmail.com`（GBPアカウント）でログイン**。  
+リフレッシュトークンは自動的に Secret Manager（`gbp-refresh-token`）に保存される。
 
-> **注意**: OAuth 同意画面がテストモードの場合、トークンは **7日で失効** します。失効したら再度このコマンドを実行してください。
+> **注意**: `yk110303@gmail.com`（APIアカウント）でログインしないこと。店舗を管理していないアカウントのトークンが保存され、通知登録が機能しない。
+
+> **注意**: OAuth 同意画面がテストモードの場合、トークンは **7日で失効** します。失効したら再度このコマンドを `kutikomikannri02@gmail.com` でログインして実行してください。
 
 ### 5. GBP 通知登録
 
@@ -186,30 +206,11 @@ npm run auth:gbp
 npm run register-notifications
 ```
 
-全 GBP アカウントに対して Pub/Sub 通知設定を登録する。
+`kutikomikannri02@gmail.com` が管理する全 GBP アカウント・全店舗に対して Pub/Sub 通知設定を登録する。
 
 ### 6. Cloud Functions デプロイ
 
-`GBP_CLIENT_SECRET` は環境変数として直接渡さず、Secret Manager 経由でバインドします。
-
-**事前準備**: `GBP_CLIENT_SECRET` を Secret Manager に登録し、Cloud Functions SA にアクセス権を付与する。
-
 ```bash
-# シークレット登録
-echo -n "YOUR_CLIENT_SECRET" | gcloud secrets create gbp-client-secret \
-  --data-file=- --project=<GCP_PROJECT_ID>
-
-# Cloud Functions SA にアクセス権付与
-gcloud secrets add-iam-policy-binding gbp-client-secret \
-  --member="serviceAccount:<SERVICE_ACCOUNT>" \
-  --role="roles/secretmanager.secretAccessor" \
-  --project=<GCP_PROJECT_ID>
-```
-
-**デプロイ**:
-
-```bash
-npm run build
 gcloud functions deploy reviewNotification \
   --gen2 \
   --runtime=nodejs22 \
@@ -217,14 +218,13 @@ gcloud functions deploy reviewNotification \
   --source=. \
   --entry-point=reviewNotification \
   --trigger-topic=gbp-review-notifications \
-  --project=<GCP_PROJECT_ID> \
-  --set-env-vars="SPREADSHEET_ID=<SPREADSHEET_ID>,GBP_CLIENT_ID=<GBP_CLIENT_ID>" \
-  --set-secrets="GBP_CLIENT_SECRET=gbp-client-secret:latest"
+  --project=oaky-gmb \
+  --update-env-vars="SPREADSHEET_ID=1tXSHtXuXmjopJ5nfZayc_VdiSwtjWUIqEMThJHV0m64,GBP_CLIENT_ID=<GBP_CLIENT_ID>,GCP_PROJECT_ID=oaky-gmb,PUBSUB_TOPIC=gbp-review-notifications,SHEET_NAME=レビュー一覧"
 ```
 
 ### 7. Google Sheets へのアクセス権付与
 
-Cloud Functions のサービスアカウント（`<SERVICE_ACCOUNT>`）をスプレッドシートの編集者として共有する。
+Cloud Functions のサービスアカウント（`429122503904-compute@developer.gserviceaccount.com`）をスプレッドシートの編集者として共有する。
 
 ## Google Sheets の出力形式
 
@@ -239,5 +239,4 @@ Cloud Functions のサービスアカウント（`<SERVICE_ACCOUNT>`）をスプ
 
 - GBP API は Google による審査・承認が必要（プロジェクト単位で承認される）
 - OAuth のリフレッシュトークンは Secret Manager で管理（コードやファイルに含めない）
-- `GBP_CLIENT_SECRET` は `--set-secrets` でバインドし、環境変数として平文で渡さない
 - `.env` は `.gitignore` に追加済み
