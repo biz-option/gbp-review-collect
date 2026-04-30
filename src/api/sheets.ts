@@ -44,15 +44,31 @@ export async function ensureSheetHeader(): Promise<void> {
   }
 }
 
+export async function getLastPollTime(): Promise<Date | null> {
+  const sheets = getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!B1`,
+  });
+  const val = res.data.values?.[0]?.[0] as string | undefined;
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 export async function updateLastFetchTime(): Promise<void> {
   const sheets = getSheetsClient();
-  const now = formatJst(new Date().toISOString());
+  const now = new Date();
 
-  await sheets.spreadsheets.values.update({
+  await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A1`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[`最終更新: ${now}`]] },
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: [
+        { range: `${SHEET_NAME}!A1`, values: [[`最終更新: ${formatJst(now.toISOString())}`]] },
+        { range: `${SHEET_NAME}!B1`, values: [[now.toISOString()]] },
+      ],
+    },
   });
 }
 

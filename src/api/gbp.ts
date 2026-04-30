@@ -52,14 +52,32 @@ export async function listAccounts(auth: OAuth2Client): Promise<Array<{ name: st
 
 export async function listLocations(
   auth: OAuth2Client,
-  accountName: string // "accounts/{accountId}"
-): Promise<Array<{ name: string; title: string }>> {
+  accountName: string, // "accounts/{accountId}"
+  pageToken?: string
+): Promise<{ locations: Array<{ name: string; title: string }>; nextPageToken?: string }> {
   const token = await auth.getAccessToken();
   const res = await axios.get(`${BUSINESS_INFO_URL}/${accountName}/locations`, {
-    params: { readMask: 'name,title' },
+    params: { readMask: 'name,title', pageSize: 100, pageToken },
     headers: { Authorization: `Bearer ${token.token}` },
   });
-  return res.data.locations ?? [];
+  const locations = (res.data.locations ?? []).map((loc: { name: string; title?: string }) => ({
+    // loc.name = "locations/{id}" → construct full path for v4 API
+    name: `${accountName}/${loc.name}`,
+    title: loc.title ?? loc.name.split('/').pop() ?? loc.name,
+  }));
+  return { locations, nextPageToken: res.data.nextPageToken };
 }
 
-export { NOTIFICATIONS_URL };
+export async function listReviews(
+  auth: OAuth2Client,
+  locationName: string // "accounts/{accountId}/locations/{locationId}"
+): Promise<Review[]> {
+  const token = await auth.getAccessToken();
+  const res = await axios.get(`${REVIEWS_URL}/${locationName}/reviews`, {
+    params: { pageSize: 10 },
+    headers: { Authorization: `Bearer ${token.token}` },
+  });
+  return res.data.reviews ?? [];
+}
+
+export { NOTIFICATIONS_URL, REVIEWS_URL };
