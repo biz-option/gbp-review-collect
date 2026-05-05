@@ -164,8 +164,9 @@ npm run auth:gbp
 ブラウザが開くので **`kutikomikannri02@gmail.com` でログイン**。  
 リフレッシュトークンは Secret Manager（`gbp-refresh-token`）に自動保存される。
 
-> **注意**: OAuth 同意画面がテストモードの場合、トークンは **7日で失効**。  
-> 失効後は再度このコマンドを `kutikomikannri02@gmail.com` でログインして実行する。
+> **2026-05-05 以降**: OAuth 同意画面を本番環境に昇格済み。
+> リフレッシュトークンの有効期限はなくなったため、定期的な再認証は**不要**。
+> ただし、本番昇格前に発行したトークンは期限切れの可能性があるため、**初回のみ再実行すること**（電話番号による本人確認が必要）。
 
 ### 4. GBP Push通知登録（任意）
 
@@ -255,6 +256,20 @@ gcloud scheduler jobs create http gbp-review-poll \
   --oidc-token-audience="https://pollreviews-7qetc7s5ba-an.a.run.app" \
   --attempt-deadline=300s
 ```
+
+---
+
+## OAuth 同意画面について
+
+| 項目 | 状態 |
+|------|------|
+| 公開ステータス | **本番環境**（2026-05-05 昇格） |
+| ユーザーの種類 | 外部 |
+| リフレッシュトークン有効期限 | **なし**（本番環境のため） |
+| プライバシーポリシー | `https://biz-option.github.io/gbp-review-collect/` |
+
+> テストモード時（〜2026-05-05）はトークンが7日で失効していたが、本番昇格後は失効しない。
+> 本番昇格後に初めて `npm run auth:gbp` を実行することで、有効期限なしのトークンが発行される。
 
 ---
 
