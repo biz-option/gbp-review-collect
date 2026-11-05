@@ -72,12 +72,18 @@ export async function listReviews(
   auth: OAuth2Client,
   locationName: string // "accounts/{accountId}/locations/{locationId}"
 ): Promise<Review[]> {
-  const token = await auth.getAccessToken();
-  const res = await axios.get(`${REVIEWS_URL}/${locationName}/reviews`, {
-    params: { pageSize: 10 },
-    headers: { Authorization: `Bearer ${token.token}` },
-  });
-  return res.data.reviews ?? [];
+  const all: Review[] = [];
+  let pageToken: string | undefined;
+  do {
+    const token = await auth.getAccessToken();
+    const res = await axios.get(`${REVIEWS_URL}/${locationName}/reviews`, {
+      params: { pageSize: 50, pageToken },
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    all.push(...(res.data.reviews ?? []));
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  return all;
 }
 
 export { NOTIFICATIONS_URL, REVIEWS_URL };
