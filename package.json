@@ -10,7 +10,8 @@
     "dev": "ts-node src/index.ts",
     "auth:gbp": "ts-node scripts/auth-init.ts gbp",
     "auth:gmail": "ts-node scripts/auth-init.ts gmail",
-    "register-notifications": "ts-node scripts/register-notifications.ts"
+    "register-notifications": "ts-node scripts/register-notifications.ts",
+    "count-reviews": "ts-node scripts/count-reviews.ts"
   },
   "dependencies": {
     "@google-cloud/functions-framework": "^3.4.0",

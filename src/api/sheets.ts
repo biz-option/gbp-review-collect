@@ -56,19 +56,30 @@ export async function getLastPollTime(): Promise<Date | null> {
   return isNaN(d.getTime()) ? null : d;
 }
 
-export async function updateLastFetchTime(): Promise<void> {
+/**
+ * 最終更新表示(A1)を更新する。ポーリング基準時刻(B1)は advanceCheckpoint=true のとき（pollReviews のみ）だけ進める。
+ * 通知ハンドラが B1 を進めると、ポーリングが未取得のレビューを飛ばすため。
+ */
+export async function updateLastFetchTime(
+  now: Date = new Date(),
+  advanceCheckpoint = false
+): Promise<void> {
   const sheets = getSheetsClient();
-  const now = new Date();
+  const data = [
+    { range: `${SHEET_NAME}!A1`, values: [[`最終更新: ${formatJst(now.toISOString())}`]] },
+  ];
+
+  // 並行実行されたハンドラが新しい時刻を書いていたら巻き戻さない（Sheets に CAS は無いので best effort）
+  if (advanceCheckpoint) {
+    const stored = await getLastPollTime();
+    if (!stored || stored < now) {
+      data.push({ range: `${SHEET_NAME}!B1`, values: [[now.toISOString()]] });
+    }
+  }
 
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      valueInputOption: 'RAW',
-      data: [
-        { range: `${SHEET_NAME}!A1`, values: [[`最終更新: ${formatJst(now.toISOString())}`]] },
-        { range: `${SHEET_NAME}!B1`, values: [[now.toISOString()]] },
-      ],
-    },
+    requestBody: { valueInputOption: 'RAW', data },
   });
 }
 

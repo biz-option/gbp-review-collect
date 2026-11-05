@@ -16,6 +16,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
     return;
   }
 
+  // チェックポイントはスキャン開始時点で確定する（スキャン中に投稿されたレビューを次回に回す）
+  const pollStartedAt = new Date();
   const auth = await getGbpAuthClient();
 
   // リクエストボディの since パラメータで基準時刻を上書き可能（キャッチアップ用）
@@ -28,6 +30,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
   await ensureSheetHeader();
 
   const newReviews: Array<{ review: Review; businessName: string }> = [];
+  const seenReviewIds = new Set<string>();   // 共有ロケーション経由の二重追記防止
+  const seenLocationIds = new Set<string>();
 
   const accounts = await listAccounts(auth);
 
@@ -42,12 +46,23 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
       pageToken = nextPageToken;
 
       // 20件ずつ並列でレビューを取得（レート制限対策）
-      for (const batch of chunk(locations, 20)) {
+      // 取得済みのロケーションは除外（同一ページ内の重複もここで除く）。seen への登録は取得成功後
+      const pageIds = new Set<string>();
+      const uniqueLocations = locations.filter((l) => {
+        const id = l.name.split('/locations/')[1];
+        if (seenLocationIds.has(id) || pageIds.has(id)) return false;
+        pageIds.add(id);
+        return true;
+      });
+      for (const batch of chunk(uniqueLocations, 20)) {
         const results = await Promise.allSettled(
           batch.map(async (location) => {
             const reviews = await listReviews(auth, location.name);
+            seenLocationIds.add(location.name.split('/locations/')[1]);
             for (const review of reviews) {
-              if (new Date(review.createTime) > lastPollTime) {
+              const createdAt = new Date(review.createTime);
+              if (createdAt > lastPollTime && createdAt <= pollStartedAt && !seenReviewIds.has(review.reviewId)) {
+                seenReviewIds.add(review.reviewId);
                 newReviews.push({ review, businessName: location.title });
               }
             }
@@ -73,7 +88,7 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
     console.log(`記録: ${businessName} / ${review.reviewId}`);
   }
 
-  await updateLastFetchTime();
+  await updateLastFetchTime(pollStartedAt, true);
 
   const msg = `ポーリング完了: ${newReviews.length} 件の新規レビューを記録`;
   console.log(msg);
