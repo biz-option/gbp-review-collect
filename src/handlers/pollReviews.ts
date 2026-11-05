@@ -46,16 +46,19 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
       pageToken = nextPageToken;
 
       // 20件ずつ並列でレビューを取得（レート制限対策）
+      // 取得済みのロケーションは除外（同一ページ内の重複もここで除く）。seen への登録は取得成功後
+      const pageIds = new Set<string>();
       const uniqueLocations = locations.filter((l) => {
         const id = l.name.split('/locations/')[1];
-        if (seenLocationIds.has(id)) return false;
-        seenLocationIds.add(id);
+        if (seenLocationIds.has(id) || pageIds.has(id)) return false;
+        pageIds.add(id);
         return true;
       });
       for (const batch of chunk(uniqueLocations, 20)) {
         const results = await Promise.allSettled(
           batch.map(async (location) => {
             const reviews = await listReviews(auth, location.name);
+            seenLocationIds.add(location.name.split('/locations/')[1]);
             for (const review of reviews) {
               const createdAt = new Date(review.createTime);
               if (createdAt > lastPollTime && createdAt <= pollStartedAt && !seenReviewIds.has(review.reviewId)) {
@@ -85,7 +88,7 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
     console.log(`記録: ${businessName} / ${review.reviewId}`);
   }
 
-  await updateLastFetchTime(pollStartedAt);
+  await updateLastFetchTime(pollStartedAt, true);
 
   const msg = `ポーリング完了: ${newReviews.length} 件の新規レビューを記録`;
   console.log(msg);
