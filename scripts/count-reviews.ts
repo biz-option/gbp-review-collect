@@ -13,6 +13,7 @@ import { listAccounts, listLocations, listReviews, REVIEWS_URL } from '../src/ap
 async function main() {
   const outPath = process.argv[2];
   const auth = await getGbpAuthClient();
+  const failed: string[] = [];
   const rows: Array<{ location: string; title: string; listReviews: number; apiTotal: number | null; fullScan: number }> = [];
 
   for (const account of await listAccounts(auth)) {
@@ -22,6 +23,7 @@ async function main() {
       pageToken = nextPageToken;
 
       for (const loc of locations) {
+        try {
         const current = (await listReviews(auth, loc.name)).length;
 
         // 正解値: 全ページを辿る
@@ -40,6 +42,10 @@ async function main() {
         } while (token);
 
         rows.push({ location: loc.name, title: loc.title, listReviews: current, apiTotal, fullScan: full });
+        } catch (e) {
+          console.warn(`失敗: ${loc.title} (${loc.name})`, (e as Error).message);
+          failed.push(loc.name);
+        }
       }
     } while (pageToken);
   }
@@ -47,6 +53,7 @@ async function main() {
   console.table(rows.map(r => ({ 店舗: r.title, listReviews: r.listReviews, apiTotal: r.apiTotal, 全ページ実数: r.fullScan })));
   const sum = (k: 'listReviews' | 'fullScan') => rows.reduce((s, r) => s + r[k], 0);
   console.log(`合計: listReviews=${sum('listReviews')} / 全ページ実数=${sum('fullScan')} / 店舗数=${rows.length}`);
+  if (failed.length) console.warn(`取得失敗 ${failed.length} 店舗: ${failed.join(', ')}`);
   if (outPath) writeFileSync(outPath, JSON.stringify(rows, null, 2));
 }
 

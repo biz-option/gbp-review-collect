@@ -16,6 +16,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
     return;
   }
 
+  // チェックポイントはスキャン開始時点で確定する（スキャン中に投稿されたレビューを次回に回す）
+  const pollStartedAt = new Date();
   const auth = await getGbpAuthClient();
 
   // リクエストボディの since パラメータで基準時刻を上書き可能（キャッチアップ用）
@@ -47,7 +49,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
           batch.map(async (location) => {
             const reviews = await listReviews(auth, location.name);
             for (const review of reviews) {
-              if (new Date(review.createTime) > lastPollTime) {
+              const createdAt = new Date(review.createTime);
+              if (createdAt > lastPollTime && createdAt <= pollStartedAt) {
                 newReviews.push({ review, businessName: location.title });
               }
             }
@@ -73,7 +76,7 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
     console.log(`記録: ${businessName} / ${review.reviewId}`);
   }
 
-  await updateLastFetchTime();
+  await updateLastFetchTime(pollStartedAt);
 
   const msg = `ポーリング完了: ${newReviews.length} 件の新規レビューを記録`;
   console.log(msg);

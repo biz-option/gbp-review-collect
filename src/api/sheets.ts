@@ -56,9 +56,8 @@ export async function getLastPollTime(): Promise<Date | null> {
   return isNaN(d.getTime()) ? null : d;
 }
 
-export async function updateLastFetchTime(): Promise<void> {
+export async function updateLastFetchTime(now: Date = new Date()): Promise<void> {
   const sheets = getSheetsClient();
-  const now = new Date();
 
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,

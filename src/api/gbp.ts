@@ -43,11 +43,18 @@ export async function getReview(
 }
 
 export async function listAccounts(auth: OAuth2Client): Promise<Array<{ name: string; accountName: string }>> {
-  const token = await auth.getAccessToken();
-  const res = await axios.get(`${ACCOUNT_MGMT_URL}/accounts`, {
-    headers: { Authorization: `Bearer ${token.token}` },
-  });
-  return res.data.accounts ?? [];
+  const all: Array<{ name: string; accountName: string }> = [];
+  let pageToken: string | undefined;
+  do {
+    const token = await auth.getAccessToken();
+    const res = await axios.get(`${ACCOUNT_MGMT_URL}/accounts`, {
+      params: { pageSize: 20, pageToken },
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    all.push(...(res.data.accounts ?? []));
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  return all;
 }
 
 export async function listLocations(
@@ -68,6 +75,26 @@ export async function listLocations(
   return { locations, nextPageToken: res.data.nextPageToken };
 }
 
+const MAX_PAGE_ATTEMPTS = 3;
+
+/** 1ページ分のレビューを取得する。429/5xx/ネットワークエラーのみ、同じ pageToken で最大3回リトライする */
+async function getReviewsPage(auth: OAuth2Client, locationName: string, pageToken?: string) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const token = await auth.getAccessToken();
+      return await axios.get(`${REVIEWS_URL}/${locationName}/reviews`, {
+        params: { pageSize: 50, pageToken },
+        headers: { Authorization: `Bearer ${token.token}` },
+      });
+    } catch (e) {
+      const status = axios.isAxiosError(e) ? e.response?.status : undefined;
+      const retryable = status === undefined || status === 429 || status >= 500;
+      if (!retryable || attempt >= MAX_PAGE_ATTEMPTS) throw e;
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
+  }
+}
+
 export async function listReviews(
   auth: OAuth2Client,
   locationName: string // "accounts/{accountId}/locations/{locationId}"
@@ -75,11 +102,7 @@ export async function listReviews(
   const all: Review[] = [];
   let pageToken: string | undefined;
   do {
-    const token = await auth.getAccessToken();
-    const res = await axios.get(`${REVIEWS_URL}/${locationName}/reviews`, {
-      params: { pageSize: 50, pageToken },
-      headers: { Authorization: `Bearer ${token.token}` },
-    });
+    const res = await getReviewsPage(auth, locationName, pageToken);
     all.push(...(res.data.reviews ?? []));
     pageToken = res.data.nextPageToken;
   } while (pageToken);
