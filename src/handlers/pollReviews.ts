@@ -30,6 +30,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
   await ensureSheetHeader();
 
   const newReviews: Array<{ review: Review; businessName: string }> = [];
+  const seenReviewIds = new Set<string>();   // 共有ロケーション経由の二重追記防止
+  const seenLocationIds = new Set<string>();
 
   const accounts = await listAccounts(auth);
 
@@ -44,13 +46,20 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
       pageToken = nextPageToken;
 
       // 20件ずつ並列でレビューを取得（レート制限対策）
-      for (const batch of chunk(locations, 20)) {
+      const uniqueLocations = locations.filter((l) => {
+        const id = l.name.split('/locations/')[1];
+        if (seenLocationIds.has(id)) return false;
+        seenLocationIds.add(id);
+        return true;
+      });
+      for (const batch of chunk(uniqueLocations, 20)) {
         const results = await Promise.allSettled(
           batch.map(async (location) => {
             const reviews = await listReviews(auth, location.name);
             for (const review of reviews) {
               const createdAt = new Date(review.createTime);
-              if (createdAt > lastPollTime && createdAt <= pollStartedAt) {
+              if (createdAt > lastPollTime && createdAt <= pollStartedAt && !seenReviewIds.has(review.reviewId)) {
+                seenReviewIds.add(review.reviewId);
                 newReviews.push({ review, businessName: location.title });
               }
             }

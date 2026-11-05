@@ -57,6 +57,10 @@ export async function getLastPollTime(): Promise<Date | null> {
 }
 
 export async function updateLastFetchTime(now: Date = new Date()): Promise<void> {
+  // 並行実行されたハンドラが新しい時刻を書いていたら巻き戻さない（Sheets に CAS は無いので best effort）
+  const stored = await getLastPollTime();
+  if (stored && stored >= now) return;
+
   const sheets = getSheetsClient();
 
   await sheets.spreadsheets.values.batchUpdate({

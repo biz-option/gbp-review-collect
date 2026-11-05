@@ -14,6 +14,7 @@ async function main() {
   const outPath = process.argv[2];
   const auth = await getGbpAuthClient();
   const failed: string[] = [];
+  const seenLocationIds = new Set<string>(); // 共有ロケーションの二重計上防止
   const rows: Array<{ location: string; title: string; listReviews: number; apiTotal: number | null; fullScan: number }> = [];
 
   for (const account of await listAccounts(auth)) {
@@ -23,6 +24,9 @@ async function main() {
       pageToken = nextPageToken;
 
       for (const loc of locations) {
+        const locId = loc.name.split('/locations/')[1];
+        if (seenLocationIds.has(locId)) continue;
+        seenLocationIds.add(locId);
         try {
         const current = (await listReviews(auth, loc.name)).length;
 
@@ -54,7 +58,8 @@ async function main() {
   const sum = (k: 'listReviews' | 'fullScan') => rows.reduce((s, r) => s + r[k], 0);
   console.log(`合計: listReviews=${sum('listReviews')} / 全ページ実数=${sum('fullScan')} / 店舗数=${rows.length}`);
   if (failed.length) console.warn(`取得失敗 ${failed.length} 店舗: ${failed.join(', ')}`);
-  if (outPath) writeFileSync(outPath, JSON.stringify(rows, null, 2));
+  if (outPath) writeFileSync(outPath, JSON.stringify({ complete: failed.length === 0, failed, rows }, null, 2));
+  if (failed.length) process.exit(1);
 }
 
 main().catch(e => { console.error(e?.response?.data ?? e); process.exit(1); });
