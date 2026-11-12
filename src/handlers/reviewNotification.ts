@@ -1,7 +1,7 @@
 import { Request, Response } from '@google-cloud/functions-framework';
 import { getGbpAuthClient } from '../auth/oauth';
 import { getReview } from '../api/gbp';
-import { appendReview, ensureSheetHeader, getRecordedReviews, updateLastFetchTime } from '../api/sheets';
+import { appendReview, ensureSheetHeader, getRecordedReviews, isRecorded, updateLastFetchTime } from '../api/sheets';
 
 interface PubSubMessage {
   data: string;  // base64エンコード
@@ -71,7 +71,7 @@ export async function handleReviewNotification(req: Request, res: Response): Pro
     // Google Sheets に追記（ヘッダーがなければ自動作成）
     await ensureSheetHeader();
     // 記録済み(UPDATED_REVIEW・Pub/Subの再配信・ポーリング済み)ならスキップ
-    if ((await getRecordedReviews()).ids.has(review.reviewId)) {
+    if (isRecorded(await getRecordedReviews(), review, businessName)) {
       console.log(`記録済みのためスキップ: ${review.reviewId}`);
       res.status(200).send('duplicate');
       return;
