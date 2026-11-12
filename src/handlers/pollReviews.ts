@@ -1,7 +1,7 @@
 import { Request, Response } from '@google-cloud/functions-framework';
 import { getGbpAuthClient } from '../auth/oauth';
 import { listAccounts, listLocations, listReviews } from '../api/gbp';
-import { appendReview, ensureSheetHeader, getLastPollTime, updateLastFetchTime } from '../api/sheets';
+import { appendReviews, ensureSheetHeader, getLastPollTime, getRecordedReviews, isRecorded, updateLastFetchTime } from '../api/sheets';
 import { Review } from '../api/gbp';
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -28,6 +28,8 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
   console.log(`ポーリング開始: 基準時刻=${lastPollTime.toISOString()}${sinceParam ? ' (手動指定)' : ''}`);
 
   await ensureSheetHeader();
+  const recorded = await getRecordedReviews();
+  let skippedDuplicates = 0;
 
   const newReviews: Array<{ review: Review; businessName: string }> = [];
   const seenReviewIds = new Set<string>();   // 共有ロケーション経由の二重追記防止
@@ -83,14 +85,16 @@ export async function handlePollReviews(req: Request, res: Response): Promise<vo
   // 新規レビューを投稿日時の古い順にSheetへ追記
   newReviews.sort((a, b) => new Date(a.review.createTime).getTime() - new Date(b.review.createTime).getTime());
 
-  for (const { review, businessName } of newReviews) {
-    await appendReview(review, businessName);
-    console.log(`記録: ${businessName} / ${review.reviewId}`);
-  }
+  const toAppend = newReviews.filter(({ review, businessName }) => !isRecorded(recorded, review, businessName));
+  skippedDuplicates = newReviews.length - toAppend.length;
+
+  // 途中で失敗した場合は例外で止まりチェックポイントは進まない。再実行時は記録済み分が重複排除される
+  await appendReviews(toAppend);
+  console.log(`追記: ${toAppend.length} 件`);
 
   await updateLastFetchTime(pollStartedAt, true);
 
-  const msg = `ポーリング完了: ${newReviews.length} 件の新規レビューを記録`;
-  console.log(msg);
-  res.status(200).json({ newReviewCount: newReviews.length, since: lastPollTime.toISOString() });
+  const recordedCount = newReviews.length - skippedDuplicates;
+  console.log(`ポーリング完了: ${recordedCount} 件を記録 (記録済みでスキップ: ${skippedDuplicates} 件)`);
+  res.status(200).json({ newReviewCount: recordedCount, skippedDuplicates, since: lastPollTime.toISOString() });
 }
