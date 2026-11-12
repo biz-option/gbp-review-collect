@@ -1,10 +1,10 @@
 import { google } from 'googleapis';
-import { Review, starToNumber } from './gbp';
+import { Review, starToNumber, stripGoogleTranslation } from './gbp';
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID!;
 const SHEET_NAME = process.env.SHEET_NAME || 'レビュー一覧';
 
-const HEADER_ROW = ['取得日時', '投稿日時', 'ビジネス名', '評価（数字）', '評価（星）', '投稿者名', 'コメント', '返信'];
+const HEADER_ROW = ['取得日時', '投稿日時', 'ビジネス名', '評価（数字）', '評価（星）', '投稿者名', 'コメント', '返信', 'レビューID'];
 
 function toStars(n: number): string {
   return '★'.repeat(n) + '☆'.repeat(5 - n);
@@ -31,10 +31,11 @@ export async function ensureSheetHeader(): Promise<void> {
   // 2行目にヘッダーがなければ書き込む（1行目は最終更新日時用）
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A2:H2`,
+    range: `${SHEET_NAME}!A2:I2`,
   });
 
-  if (!res.data.values || res.data.values.length === 0) {
+  // 空、または旧ヘッダー(I列「レビューID」なし)なら書き込む
+  if (!res.data.values || res.data.values.length === 0 || res.data.values[0].length < HEADER_ROW.length) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${SHEET_NAME}!A2`,
@@ -83,35 +84,77 @@ export async function updateLastFetchTime(
   });
 }
 
-export async function appendReview(
-  review: Review,
-  businessName: string
-): Promise<void> {
+/** 旧データ(I列にレビューIDが無い行)との照合用キー: 投稿日時|ビジネス名|投稿者名 */
+function fallbackKey(postedAt: string, businessName: string, reviewer: string): string {
+  return `${postedAt}|${businessName}|${reviewer}`;
+}
+
+/** 記録済みレビューの照合用データ。ID は I列、旧行は B/C/F列のキーで判定する */
+export interface RecordedReviews {
+  ids: Set<string>;
+  fallbackKeys: Set<string>;
+}
+
+/** シートの記録済みレビューを一括取得する（重複排除用） */
+export async function getRecordedReviews(): Promise<RecordedReviews> {
   const sheets = getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SHEET_NAME}!A3:I`,
+  });
+  const ids = new Set<string>();
+  const fallbackKeys = new Set<string>();
+  for (const row of res.data.values ?? []) {
+    const id = row[8] as string | undefined;
+    if (id) ids.add(String(id));
+    else fallbackKeys.add(fallbackKey(row[1] ?? '', row[2] ?? '', row[5] ?? ''));
+  }
+  return { ids, fallbackKeys };
+}
 
-  const starNum = starToNumber(review.starRating);
-  const fetchedAt = formatJst(new Date().toISOString());
-  const postedAt = formatJst(review.createTime);
+/** 記録済みか判定する。ID があれば ID のみ、旧行は日時+ビジネス名+投稿者名で判定 */
+export function isRecorded(recorded: RecordedReviews, review: Review, businessName: string): boolean {
+  if (recorded.ids.has(review.reviewId)) return true;
   const reviewer = review.reviewer.isAnonymous ? '匿名ユーザー' : review.reviewer.displayName;
-  const comment = review.comment ?? '';
-  const reply = review.reviewReply?.comment ?? '';
+  return recorded.fallbackKeys.has(fallbackKey(formatJst(review.createTime), businessName, reviewer));
+}
 
-  const row = [
-    fetchedAt,
-    postedAt,
+function toRow(review: Review, businessName: string): Array<string | number> {
+  const starNum = starToNumber(review.starRating);
+  const reviewer = review.reviewer.isAnonymous ? '匿名ユーザー' : review.reviewer.displayName;
+  return [
+    formatJst(new Date().toISOString()),
+    formatJst(review.createTime),
     businessName,
     starNum,
     toStars(starNum),
     reviewer,
-    comment,
-    reply,
+    stripGoogleTranslation(review.comment),
+    stripGoogleTranslation(review.reviewReply?.comment),
+    review.reviewId,
   ];
+}
 
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A3:H`,
-    valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [row] },
-  });
+const APPEND_CHUNK_SIZE = 500;
+
+/** 複数レビューを APPEND_CHUNK_SIZE 件ずつまとめて追記する（書き込みAPIの回数・レート制限対策） */
+export async function appendReviews(
+  items: Array<{ review: Review; businessName: string }>
+): Promise<void> {
+  const sheets = getSheetsClient();
+  for (let i = 0; i < items.length; i += APPEND_CHUNK_SIZE) {
+    const values = items.slice(i, i + APPEND_CHUNK_SIZE).map(({ review, businessName }) => toRow(review, businessName));
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SHEET_NAME}!A3:I`,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values },
+    });
+  }
+}
+
+/** 1件追記する（通知ハンドラ用） */
+export async function appendReview(review: Review, businessName: string): Promise<void> {
+  await appendReviews([{ review, businessName }]);
 }

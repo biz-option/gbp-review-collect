@@ -1,7 +1,8 @@
 import { Request, Response } from '@google-cloud/functions-framework';
+import { OAuth2Client } from 'google-auth-library';
 import { getGbpAuthClient } from '../auth/oauth';
-import { getReview } from '../api/gbp';
-import { appendReview, ensureSheetHeader, updateLastFetchTime } from '../api/sheets';
+import { getReview, listLocations } from '../api/gbp';
+import { appendReview, ensureSheetHeader, getRecordedReviews, isRecorded, updateLastFetchTime } from '../api/sheets';
 
 interface PubSubMessage {
   data: string;  // base64エンコード
@@ -19,6 +20,23 @@ interface GbpNotification {
   name: string;        // "accounts/{accountId}/locations/{locationId}"
   type: string;        // "NEW_REVIEW" | "UPDATED_REVIEW" | etc.
   reviewId?: string;
+}
+
+/** ポーリングと同じ title を locations API から取得する。失敗時は locationId にフォールバック */
+async function resolveBusinessName(auth: OAuth2Client, locationName: string, locationId: string): Promise<string> {
+  const accountName = locationName.split('/').slice(0, 2).join('/'); // "accounts/{accountId}"
+  try {
+    let pageToken: string | undefined;
+    do {
+      const page = await listLocations(auth, accountName, pageToken);
+      const hit = page.locations.find(l => l.name === locationName);
+      if (hit) return hit.title;
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+  } catch (err) {
+    console.error('ビジネス名の取得に失敗。locationId を使用:', err);
+  }
+  return locationId;
 }
 
 export async function handleReviewNotification(req: Request, res: Response): Promise<void> {
@@ -66,10 +84,18 @@ export async function handleReviewNotification(req: Request, res: Response): Pro
     // ビジネス名を location の name から抽出（後で locations API から取得するよう拡張可）
     // notification.name = "accounts/{accountId}/locations/{locationId}"
     const locationId = notification.name.split('/').pop() ?? notification.name;
-    const businessName = locationId; // TODO: locations APIでtitleを取得
+    const businessName = await resolveBusinessName(auth, notification.name, locationId);
 
     // Google Sheets に追記（ヘッダーがなければ自動作成）
     await ensureSheetHeader();
+    // 記録済み(UPDATED_REVIEW・Pub/Subの再配信・ポーリング済み)ならスキップ
+    // 旧通知行は locationId をビジネス名として記録しているため、title と locationId の両方で照合する
+    const recorded = await getRecordedReviews();
+    if (isRecorded(recorded, review, businessName) || isRecorded(recorded, review, locationId)) {
+      console.log(`記録済みのためスキップ: ${review.reviewId}`);
+      res.status(200).send('duplicate');
+      return;
+    }
     await appendReview(review, businessName);
 
     // 最終取得日時を更新

@@ -31,6 +31,20 @@ export function starToNumber(rating: string): number {
   return STAR_MAP[rating] ?? 0;
 }
 
+const TRANSLATED_PREFIX = /^\s*[(（]\s*(?:Translated by Google|Google\s*による翻訳)\s*[)）]\s*/i;
+const ORIGINAL_MARKER = /[(（]\s*(?:Original|原文)\s*[)）]\s*/i;
+
+/**
+ * Google 翻訳で付与された訳文を除き、投稿者の原文だけを返す。
+ * 形式: "(Translated by Google) 訳文 \n\n(Original) 原文"。原文マーカーが無ければ接頭辞だけ除く。
+ */
+export function stripGoogleTranslation(text: string | undefined): string {
+  if (!text) return '';
+  if (!TRANSLATED_PREFIX.test(text)) return text;
+  const m = ORIGINAL_MARKER.exec(text);
+  return (m ? text.slice(m.index + m[0].length) : text.replace(TRANSLATED_PREFIX, '')).trim();
+}
+
 export async function getReview(
   auth: OAuth2Client,
   reviewName: string  // "accounts/{accountId}/locations/{locationId}/reviews/{reviewId}"
